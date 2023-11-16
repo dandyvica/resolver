@@ -13,8 +13,9 @@ use windows::Win32::{
     Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6},
 };
 
+#[derive(Debug)]
 pub struct Resolver {
-    pub servers: Vec<IpAddr>
+    pub servers: Vec<IpAddr>,
 }
 
 impl Resolver {
@@ -34,12 +35,9 @@ impl Resolver {
             .filter(|line| line.trim().starts_with("nameserver"))
             .filter_map(|addr| addr.split_ascii_whitespace().nth(1))
             .map(|ip| IpAddr::from_str(ip))
-            .collect::<Result<Vec<_>, _>>()
-            ?;
+            .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Self {
-            servers: servers
-        })
+        Ok(Self { servers: servers })
     }
 
     /// Return only IPV4 DNS resolvers on the machine.
@@ -59,7 +57,7 @@ impl Resolver {
     }
 
     #[cfg(target_family = "windows")]
-    pub fn get_servers(_resolv: Option<&str>) -> Result<Vec<IpAddr>, Error> {
+    pub fn get_servers(_resolv: Option<&str>) -> Result<Self, Error> {
         let mut v = Vec::new();
 
         // first call
@@ -105,7 +103,7 @@ impl Resolver {
                         p = (*p).Next;
                     }
                 }
-                Ok(v)
+                Ok(Self { servers: v })
             } else {
                 Err(Error::Windows(rc))
             }
