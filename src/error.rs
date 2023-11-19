@@ -4,6 +4,7 @@ use std::{io, net::AddrParseError};
 pub enum Error {
     Io(io::Error),
     AddrParseError(AddrParseError),
+    NoResolverConfigured,
     #[cfg(target_family = "windows")]
     Windows(u32),
 }

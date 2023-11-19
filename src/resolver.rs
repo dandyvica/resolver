@@ -14,18 +14,19 @@ use windows::Win32::{
 };
 
 #[derive(Debug)]
-pub struct Resolver {
-    pub servers: Vec<IpAddr>,
+pub struct Resolvers {
+    pub v4: Vec<IpAddr>,
+    pub v6: Vec<IpAddr>,
 }
 
-impl Resolver {
+impl Resolvers {
     #[cfg(target_family = "unix")]
     /// Return IPV4 & IPV6 DNS resolvers on the machine.
-    pub fn get_servers(resolv: Option<&str>) -> Result<Self, Error> {
-        const RESOLV_CONF_FILE: &'static str = "/etc/resolv.conf";
+    pub fn get_servers(conf: Option<&str>) -> Result<Self, Error> {
+        const RESOLV_CONF_FILE: &str = "/etc/resolv.conf";
 
         // resolv file is usually at "/etc/resolv.conf" but some distros (Ubuntu) moved it elsewhere
-        let resolv_file = resolv.unwrap_or(RESOLV_CONF_FILE);
+        let resolv_file = conf.unwrap_or(RESOLV_CONF_FILE);
 
         // read whole file, get rid of comments and extract DNS stubs
         let resolv_conf = std::fs::read_to_string(resolv_file)?;
@@ -34,26 +35,17 @@ impl Resolver {
             .lines()
             .filter(|line| line.trim().starts_with("nameserver"))
             .filter_map(|addr| addr.split_ascii_whitespace().nth(1))
-            .map(|ip| IpAddr::from_str(ip))
+            .map(IpAddr::from_str)
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Self { servers: servers })
-    }
+        if servers.is_empty() {
+            return Err(Error::NoResolverConfigured);
+        }
 
-    /// Return only IPV4 DNS resolvers on the machine.
-    pub fn get_ipv4_servers(resolv: Option<&str>) -> Result<Self, Error> {
-        let mut r = Resolver::get_servers(resolv)?;
-        r.servers.retain(|x| x.is_ipv4());
+        let v4: Vec<IpAddr> = servers.iter().filter(|x| x.is_ipv4()).cloned().collect();
+        let v6: Vec<IpAddr> = servers.iter().filter(|x| x.is_ipv6()).cloned().collect();
 
-        Ok(r)
-    }
-
-    /// Return only IPV6 DNS resolvers on the machine.
-    pub fn get_ipv6_servers(resolv: Option<&str>) -> Result<Self, Error> {
-        let mut r = Resolver::get_servers(resolv)?;
-        r.servers.retain(|x| x.is_ipv6());
-
-        Ok(r)
+        Ok(Self { v4, v6 })
     }
 
     #[cfg(target_family = "windows")]
@@ -94,7 +86,7 @@ impl Resolver {
                         // loop through DNS addresses for this adapter
                         while !p_dns.is_null() {
                             let sockaddr = (*p_dns).Address.lpSockaddr;
-                            let dns_addr = Resolver::from_sockaddr(sockaddr)?;
+                            let dns_addr = Resolvers::from_sockaddr(sockaddr)?;
                             v.push(dns_addr);
 
                             p_dns = (*p_dns).Next;
