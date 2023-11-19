@@ -50,7 +50,7 @@ impl Resolvers {
 
     #[cfg(target_family = "windows")]
     pub fn get_servers(_resolv: Option<&str>) -> Result<Self, Error> {
-        let mut v = Vec::new();
+        let mut servers = Vec::new();
 
         // first call
         let family = AF_UNSPEC.0 as u32;
@@ -87,7 +87,7 @@ impl Resolvers {
                         while !p_dns.is_null() {
                             let sockaddr = (*p_dns).Address.lpSockaddr;
                             let dns_addr = Resolvers::from_sockaddr(sockaddr)?;
-                            v.push(dns_addr);
+                            servers.push(dns_addr);
 
                             p_dns = (*p_dns).Next;
                         }
@@ -95,7 +95,10 @@ impl Resolvers {
                         p = (*p).Next;
                     }
                 }
-                Ok(Self { servers: v })
+                let v4: Vec<IpAddr> = servers.iter().filter(|x| x.is_ipv4()).cloned().collect();
+                let v6: Vec<IpAddr> = servers.iter().filter(|x| x.is_ipv6()).cloned().collect();
+        
+                Ok(Self { v4, v6 })
             } else {
                 Err(Error::Windows(rc))
             }
