@@ -1,18 +1,18 @@
 use crate::error::Error;
 use std::net::IpAddr;
 
-// Identify a single resolver
-#[derive(Debug, Clone)]
-pub struct Resolver {
-    // interface name (like "Ethernet 2")
-    if_name: String,
+// // Identify a single resolver
+// #[derive(Debug, Clone)]
+// pub struct Resolver {
+//     // interface name (like "Ethernet 2")
+//     if_name: String,
 
-    // interface index (like 12)
-    if_index: u32,
+//     // interface index (like 12)
+//     if_index: u32,
 
-    // list of DNS resolvers for this interface
-    ip_list: Vec<IpAddr>,
-}
+//     // list of DNS resolvers for this interface
+//     ip_list: Vec<IpAddr>,
+// }
 
 impl Resolver {
     pub fn if_name(&self) -> &str {
@@ -28,10 +28,10 @@ impl Resolver {
     }
 }
 
-#[derive(Debug)]
-pub struct ResolverList {
-    resolvers: Vec<Resolver>,
-}
+// #[derive(Debug)]
+// pub struct ResolverList {
+//     resolvers: Vec<Resolver>,
+// }
 
 use windows::Win32::{
     Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_INVALID_PARAMETER, ERROR_SUCCESS},

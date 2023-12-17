@@ -4,10 +4,7 @@ use std::net::IpAddr;
 use std::path::Path;
 use std::str::FromStr;
 
-#[derive(Debug)]
-pub struct ResolverList {
-    resolvers: Vec<IpAddr>,
-}
+use crate::ResolverList;
 
 impl ResolverList {
     pub fn len(&self) -> usize {
