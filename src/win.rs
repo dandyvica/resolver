@@ -24,7 +24,7 @@ impl Resolver {
     }
 
     pub fn ip_list(&self) -> &[IpAddr] {
-        &self.ip_list.as_slice()
+        self.ip_list.as_slice()
     }
 }
 
@@ -44,6 +44,10 @@ use windows::Win32::{
 impl ResolverList {
     pub fn len(&self) -> usize {
         self.resolvers.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.resolvers.is_empty()
     }
 
     pub fn get() -> Result<Self, Error> {
@@ -102,7 +106,6 @@ impl ResolverList {
                             ip_list,
                         };
 
-                        println!("{:?}", res);
                         list.push(res);
 
                         p = (*p).Next;
@@ -165,7 +168,7 @@ impl TryFrom<&str> for Resolver {
         list.resolvers.retain(|x| x.if_name.as_str() == if_name);
         debug_assert!(list.len() <= 1);
 
-        if list.resolvers.is_empty() {
+        if list.is_empty() {
             return  Err(Error::InterfaceNotFound);
         }
 
@@ -182,7 +185,7 @@ impl TryFrom<u32> for Resolver {
         list.resolvers.retain(|x| x.if_index == if_index);
         debug_assert!(list.len() <= 1);
 
-        if list.resolvers.is_empty() {
+        if list.is_empty() {
             return  Err(Error::InterfaceNotFound);
         }        
 
