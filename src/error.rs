@@ -5,8 +5,13 @@ pub enum Error {
     Io(io::Error),
     AddrParseError(AddrParseError),
     NoResolverConfigured,
+    
     #[cfg(target_family = "windows")]
     Windows(u32),
+
+    #[cfg(target_family = "windows")]
+    InterfaceNotFound
+
 }
 
 // All convertion for internal errors for DNSError

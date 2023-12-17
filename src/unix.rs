@@ -1,26 +1,9 @@
 use crate::error::Error;
 use std::net::IpAddr;
 
-#[cfg(target_family = "unix")]
 use std::str::FromStr;
 
-#[cfg(target_family = "windows")]
-use windows::Win32::{
-    Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_INVALID_PARAMETER, ERROR_SUCCESS},
-    NetworkManagement::IpHelper::{
-        GetAdaptersAddresses, GAA_FLAG_INCLUDE_PREFIX, IP_ADAPTER_ADDRESSES_LH,
-    },
-    Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6},
-};
-
-#[derive(Debug)]
-pub struct Resolvers {
-    pub v4: Vec<IpAddr>,
-    pub v6: Vec<IpAddr>,
-}
-
 impl Resolvers {
-    #[cfg(target_family = "unix")]
     /// Return IPV4 & IPV6 DNS resolvers on the machine.
     pub fn get_servers(conf: Option<&str>) -> Result<Self, Error> {
         const RESOLV_CONF_FILE: &str = "/etc/resolv.conf";
@@ -47,5 +30,28 @@ impl Resolvers {
 
         Ok(Self { v4, v6 })
     }
+}
 
+#[cfg(test)]
+mod tests {
+    // Note this useful idiom: importing names from outer (for mod tests) scope.
+    use std::net::IpAddr;
+    use std::str::FromStr;
+
+    use crate::resolver::Resolvers;
+
+    #[test]
+    fn test_unix() {
+        let s1 = Resolvers::get_servers(Some("./tests/resolv.conf"));
+        assert!(s1.is_ok());
+
+        let s2 = s1.unwrap();
+        assert_eq!(s2.v4.len(), 2);
+        assert_eq!(s2.v6.len(), 2);
+
+        assert!(s2.v4.contains(&IpAddr::from_str("45.90.28.55").unwrap()));
+        assert!(s2.v4.contains(&IpAddr::from_str("45.90.30.55").unwrap()));
+        assert!(s2.v6.contains(&IpAddr::from_str("2a07:a8c0::").unwrap()));
+        assert!(s2.v6.contains(&IpAddr::from_str("2a07:a8c1::").unwrap()));
+    }
 }
