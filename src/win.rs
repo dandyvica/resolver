@@ -1,18 +1,28 @@
-use crate::error::Error;
 use std::net::IpAddr;
 
-// // Identify a single resolver
-// #[derive(Debug, Clone)]
-// pub struct Resolver {
-//     // interface name (like "Ethernet 2")
-//     if_name: String,
+#[cfg(target_family = "windows")]
+use windows::Win32::{
+    Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_INVALID_PARAMETER, ERROR_SUCCESS},
+    NetworkManagement::IpHelper::{
+        GetAdaptersAddresses, GAA_FLAG_INCLUDE_PREFIX, IP_ADAPTER_ADDRESSES_LH,
+    },
+    Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6},
+};
 
-//     // interface index (like 12)
-//     if_index: u32,
+use crate::error::Error;
 
-//     // list of DNS resolvers for this interface
-//     ip_list: Vec<IpAddr>,
-// }
+/// Identify a single resolver
+#[derive(Debug, Clone)]
+pub struct Resolver {
+    // interface name (like "Ethernet 2")
+    if_name: String,
+
+    // interface index (like 12)
+    if_index: u32,
+
+    // list of DNS resolvers for this interface
+    ip_list: Vec<IpAddr>,
+}
 
 impl Resolver {
     pub fn if_name(&self) -> &str {
@@ -28,18 +38,9 @@ impl Resolver {
     }
 }
 
-// #[derive(Debug)]
-// pub struct ResolverList {
-//     resolvers: Vec<Resolver>,
-// }
-
-use windows::Win32::{
-    Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_INVALID_PARAMETER, ERROR_SUCCESS},
-    NetworkManagement::IpHelper::{
-        GetAdaptersAddresses, GAA_FLAG_INCLUDE_PREFIX, IP_ADAPTER_ADDRESSES_LH,
-    },
-    Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6},
-};
+pub struct ResolverList {
+    resolvers: Vec<Resolver>,
+}
 
 impl ResolverList {
     pub fn len(&self) -> usize {
@@ -169,7 +170,7 @@ impl TryFrom<&str> for Resolver {
         debug_assert!(list.len() <= 1);
 
         if list.is_empty() {
-            return  Err(Error::InterfaceNotFound);
+            return Err(Error::InterfaceNotFound);
         }
 
         Ok(list.resolvers[0].clone())
@@ -186,8 +187,8 @@ impl TryFrom<u32> for Resolver {
         debug_assert!(list.len() <= 1);
 
         if list.is_empty() {
-            return  Err(Error::InterfaceNotFound);
-        }        
+            return Err(Error::InterfaceNotFound);
+        }
 
         Ok(list.resolvers[0].clone())
     }
@@ -218,7 +219,7 @@ mod tests {
 
         let res = Resolver::try_from(2).unwrap();
         assert_eq!(res.ip_list().len(), 2);
-        
+
         let res = Resolver::try_from("Ethernet 2").unwrap();
         assert_eq!(res.ip_list().len(), 2);
 
@@ -227,6 +228,5 @@ mod tests {
 
         let res = Resolver::try_from("XXXXXX").unwrap_err();
         assert!(matches!(res, Error::InterfaceNotFound));
-
     }
 }
