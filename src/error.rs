@@ -4,7 +4,6 @@ use std::{io, net::AddrParseError};
 #[derive(Debug)]
 pub enum Error {
     /// On UNIX, the error returned when the file containing the name servers is not readable.
-    #[cfg(any(unix, doc))]
     Io(io::Error),
 
     /// IP address parsing error.

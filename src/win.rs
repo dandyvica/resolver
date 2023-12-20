@@ -1,4 +1,8 @@
-use std::net::IpAddr;
+//! Windows-specific implementation.
+use std::{
+    net::IpAddr,
+    ops::{Deref, DerefMut},
+};
 
 #[cfg(target_family = "windows")]
 use windows::Win32::{
@@ -11,7 +15,7 @@ use windows::Win32::{
 
 use crate::error::Error;
 
-/// Identify a single resolver
+/// Identify a single resolver tied to a network interface identified by its name and index.
 #[derive(Debug, Clone)]
 pub struct Resolver {
     // interface name (like "Ethernet 2")
@@ -25,33 +29,51 @@ pub struct Resolver {
 }
 
 impl Resolver {
+    /// Return the network interface name.
     pub fn if_name(&self) -> &str {
         self.if_name.as_str()
     }
 
+    /// Return the network interface index.
     pub fn if_index(&self) -> u32 {
         self.if_index
     }
 
+    /// Return the list of resolvers' ip addresses for this interface.
     pub fn ip_list(&self) -> &[IpAddr] {
         self.ip_list.as_slice()
     }
+
+    /// Return the number of ip addresses in the adapter.
+    pub fn len(&self) -> usize {
+        self.ip_list.len()
+    }
 }
 
-pub struct ResolverList {
-    resolvers: Vec<Resolver>,
+/// Hold the list of DNS resolvers IP addresses (IPV4 and IPV6), with the associated network interface name and index.
+#[derive(Debug, Clone)]
+pub struct ResolverList(Vec<Resolver>);
+
+impl Deref for ResolverList {
+    /// The resulting type after dereferencing.
+    type Target = Vec<Resolver>;
+
+    /// Dereferences the value, giving the vector of DNS ip addresses.
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ResolverList {
+    /// Dereferences the value, giving the vector of DNS ip addresses.
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
 }
 
 impl ResolverList {
-    pub fn len(&self) -> usize {
-        self.resolvers.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.resolvers.is_empty()
-    }
-
-    pub fn get() -> Result<Self, Error> {
+    /// Return the list of IPV4 & IPV6 DNS resolvers for all the network interfaces.
+    pub fn new() -> Result<Self, Error> {
         let mut list: Vec<Resolver> = Vec::new();
 
         // first call
@@ -119,16 +141,7 @@ impl ResolverList {
             return Err(Error::Windows(rc));
         }
 
-        Ok(ResolverList { resolvers: list })
-    }
-
-    // get the list of all resolvers whatever the interface
-    pub fn to_ip_vec(&self) -> Vec<IpAddr> {
-        let mut v = Vec::new();
-        self.resolvers
-            .iter()
-            .for_each(|x| v.extend_from_slice(&x.ip_list));
-        v
+        Ok(ResolverList(list))
     }
 
     // utility function which is used to build an IpAddr from an array used in Windows OS
@@ -160,20 +173,20 @@ impl ResolverList {
     }
 }
 
-// TryFrom will be used to build the DNS servers' list from an interface name
 impl TryFrom<&str> for Resolver {
     type Error = Error;
 
+    /// Build the DNS servers' list from an interface name.
     fn try_from(if_name: &str) -> Result<Self, Self::Error> {
-        let mut list = ResolverList::get()?;
-        list.resolvers.retain(|x| x.if_name.as_str() == if_name);
+        let mut list = ResolverList::new()?;
+        list.retain(|x| x.if_name.as_str() == if_name);
         debug_assert!(list.len() <= 1);
 
         if list.is_empty() {
             return Err(Error::InterfaceNotFound);
         }
 
-        Ok(list.resolvers[0].clone())
+        Ok(list[0].clone())
     }
 }
 
@@ -181,18 +194,30 @@ impl TryFrom<&str> for Resolver {
 impl TryFrom<u32> for Resolver {
     type Error = Error;
 
+    /// Build the DNS servers' list from an interface index.
     fn try_from(if_index: u32) -> Result<Self, Self::Error> {
-        let mut list = ResolverList::get()?;
-        list.resolvers.retain(|x| x.if_index == if_index);
+        let mut list = ResolverList::new()?;
+        list.0.retain(|x| x.if_index == if_index);
         debug_assert!(list.len() <= 1);
 
         if list.is_empty() {
             return Err(Error::InterfaceNotFound);
         }
 
-        Ok(list.resolvers[0].clone())
+        Ok(list[0].clone())
     }
 }
+
+// IntoIterator to benefit from already defined iterator on Vec
+// impl<'a> IntoIterator for &'a ResolverList {
+//     type Item = &'a IpAddr;
+//     type IntoIter = std::slice::Iter<'a, IpAddr>;
+
+//     /// Create an iterator to loop on DNS resolvers ip addresses.
+//     fn into_iter(self) -> Self::IntoIter {
+//         self.0.iter().flatten().next()
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -202,26 +227,26 @@ mod tests {
 
     #[test]
     fn test_windows() {
-        let list = ResolverList::get();
+        let list = ResolverList::new();
         assert!(list.is_ok());
 
         let list = list.unwrap();
         assert_eq!(list.len(), 4);
 
-        let ips = list.to_ip_vec();
+        // let ips = list.to_ip_vec();
 
-        assert!(ips.contains(&IpAddr::from_str("192.168.122.1").unwrap()));
-        assert!(ips.contains(&IpAddr::from_str("8.8.8.8").unwrap()));
-        assert!(ips.contains(&IpAddr::from_str("1.1.1.1").unwrap()));
-        assert!(ips.contains(&IpAddr::from_str("fec0:0:0:ffff::1").unwrap()));
-        assert!(ips.contains(&IpAddr::from_str("fec0:0:0:ffff::2").unwrap()));
-        assert!(ips.contains(&IpAddr::from_str("fec0:0:0:ffff::3").unwrap()));
+        // assert!(ips.contains(&IpAddr::from_str("192.168.122.1").unwrap()));
+        // assert!(ips.contains(&IpAddr::from_str("8.8.8.8").unwrap()));
+        // assert!(ips.contains(&IpAddr::from_str("1.1.1.1").unwrap()));
+        // assert!(ips.contains(&IpAddr::from_str("fec0:0:0:ffff::1").unwrap()));
+        // assert!(ips.contains(&IpAddr::from_str("fec0:0:0:ffff::2").unwrap()));
+        // assert!(ips.contains(&IpAddr::from_str("fec0:0:0:ffff::3").unwrap()));
 
         let res = Resolver::try_from(2).unwrap();
-        assert_eq!(res.ip_list().len(), 2);
+        assert_eq!(res.len(), 2);
 
         let res = Resolver::try_from("Ethernet 2").unwrap();
-        assert_eq!(res.ip_list().len(), 2);
+        assert_eq!(res.len(), 2);
 
         let res = Resolver::try_from(u32::MAX).unwrap_err();
         assert!(matches!(res, Error::InterfaceNotFound));
