@@ -21,7 +21,7 @@ use std::{
     str::FromStr,
 };
 
-#[cfg(target_os = "unix")]
+#[cfg(target_os = "linux")]
 use std::path::Path;
 
 use crate::error::Error;
