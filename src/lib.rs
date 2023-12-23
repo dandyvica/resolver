@@ -18,9 +18,11 @@ pub mod error;
 use std::{
     net::{IpAddr, SocketAddr},
     ops::{Deref, DerefMut},
-    path::Path,
     str::FromStr,
 };
+
+#[cfg(target_os = "unix")]
+use std::path::Path;
 
 use crate::error::Error;
 
@@ -290,8 +292,8 @@ impl ResolverList {
 
                         // save resolver into the list
                         let res = Resolver {
-                            if_name,
-                            if_index,
+                            if_name: Some(if_name),
+                            if_index: Some(if_index),
                             ip_list,
                         };
 
@@ -346,7 +348,7 @@ impl TryFrom<&str> for Resolver {
     /// Build the DNS servers' list from an interface name.
     fn try_from(if_name: &str) -> Result<Self, Self::Error> {
         let mut list = ResolverList::new()?;
-        list.retain(|x| x.if_name.as_str() == if_name);
+        list.retain(|x| x.if_name.as_ref() == Some(&if_name.to_string()));
         debug_assert!(list.len() <= 1);
 
         if list.is_empty() {
@@ -365,7 +367,7 @@ impl TryFrom<u32> for Resolver {
     /// Build the DNS servers' list from an interface index.
     fn try_from(if_index: u32) -> Result<Self, Self::Error> {
         let mut list = ResolverList::new()?;
-        list.0.retain(|x| x.if_index == if_index);
+        list.0.retain(|x| x.if_index == Some(if_index));
         debug_assert!(list.len() <= 1);
 
         if list.is_empty() {
@@ -468,4 +470,35 @@ mod tests {
         // assert_eq!(iter.next(), Some(&IpAddr::from_str("2a07:a8c1::").unwrap()));
         // assert!(iter.next().is_none());
     }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows() {
+        let list = ResolverList::new();
+        assert!(list.is_ok());
+
+        let list = list.unwrap();
+        assert_eq!(list.len(), 4);
+
+        assert!(list.contains("192.168.122.1").unwrap());
+        assert!(list.contains("8.8.8.8").unwrap());
+        assert!(list.contains("1.1.1.1").unwrap());
+        assert!(list.contains("fec0:0:0:ffff::1").unwrap());
+        assert!(list.contains("fec0:0:0:ffff::2").unwrap());
+        assert!(list.contains("fec0:0:0:ffff::3").unwrap());
+        assert!(!list.contains("9.9.9.9").unwrap());
+
+
+        let res = Resolver::try_from(2).unwrap();
+        assert_eq!(res.len(), 2);
+
+        let res = Resolver::try_from("Ethernet 2").unwrap();
+        assert_eq!(res.len(), 2);
+
+        let res = Resolver::try_from(u32::MAX).unwrap_err();
+        assert!(matches!(res, Error::InterfaceNotFound));
+
+        let res = Resolver::try_from("XXXXXX").unwrap_err();
+        assert!(matches!(res, Error::InterfaceNotFound));
+    }    
 }
