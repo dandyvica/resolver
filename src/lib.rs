@@ -21,7 +21,7 @@ use std::{
     str::FromStr,
 };
 
-#[cfg(target_os = "linux")]
+#[cfg(target_family = "unix")]
 use std::path::Path;
 
 use crate::error::Error;
@@ -182,7 +182,7 @@ impl DerefMut for ResolverList {
 //----------------------------------------------------------------------------------
 // Unix definitions
 //----------------------------------------------------------------------------------
-#[cfg(target_os = "linux")]
+#[cfg(target_family = "unix")]
 impl ResolverList {
     /// Return the list of IPV4 & IPV6 DNS resolvers by reading the `/etc/resolv.conf` file.
     pub fn new() -> Result<Self, Error> {
@@ -193,7 +193,7 @@ impl ResolverList {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(target_family = "unix")]
 impl TryFrom<&Path> for ResolverList {
     type Error = Error;
 
@@ -238,7 +238,7 @@ use windows::Win32::{
     Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6},
 };
 
-#[cfg(target_os = "windows")]
+#[cfg(target_family = "windows")]
 impl ResolverList {
     /// Return the list of IPV4 & IPV6 DNS resolvers for all the network interfaces.
     pub fn new() -> Result<Self, Error> {
@@ -341,7 +341,7 @@ impl ResolverList {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(target_family = "windows")]
 impl TryFrom<&str> for Resolver {
     type Error = Error;
 
@@ -359,7 +359,7 @@ impl TryFrom<&str> for Resolver {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(target_family = "windows")]
 // TryFrom will be used to build the DNS servers' list from an interface index
 impl TryFrom<u32> for Resolver {
     type Error = Error;
@@ -447,7 +447,7 @@ mod tests {
     //     assert!(iter.next().is_none());
     // }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(target_family = "unix")]
     #[test]
     fn unix() {
         let list = ResolverList::try_from(Path::new("./tests/resolv.conf"));
@@ -471,7 +471,7 @@ mod tests {
         // assert!(iter.next().is_none());
     }
 
-    #[cfg(target_os = "windows")]
+    #[cfg(target_family = "windows")]
     #[test]
     fn windows() {
         let list = ResolverList::new();
