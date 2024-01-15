@@ -109,6 +109,15 @@ impl ResolverList {
             .map(|x| SocketAddr::new(*x, port))
             .collect()
     }
+
+    /// Convert to a vector of IpAddr
+    pub fn to_ip_list(&self) -> Vec<IpAddr> {
+        self.iter()
+            .fold(Vec::new(), |mut acc, x| {
+                acc.extend(&x.ip_list);
+                acc
+            })
+    }
 }
 
 impl Deref for ResolverList {
@@ -488,7 +497,6 @@ mod tests {
         assert!(list.contains("fec0:0:0:ffff::3").unwrap());
         assert!(!list.contains("9.9.9.9").unwrap());
 
-
         let res = Resolver::try_from(2).unwrap();
         assert_eq!(res.len(), 2);
 
@@ -500,5 +508,5 @@ mod tests {
 
         let res = Resolver::try_from("XXXXXX").unwrap_err();
         assert!(matches!(res, Error::InterfaceNotFound));
-    }    
+    }
 }
