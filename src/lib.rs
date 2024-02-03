@@ -21,9 +21,6 @@ use std::{
     str::FromStr, path::Path,
 };
 
-#[cfg(target_family = "unix")]
-use std::path::Path;
-
 use crate::error::Error;
 
 //----------------------------------------------------------------------------------
