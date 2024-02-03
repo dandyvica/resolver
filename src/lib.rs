@@ -18,7 +18,7 @@ pub mod error;
 use std::{
     net::{IpAddr, SocketAddr},
     ops::{Deref, DerefMut},
-    str::FromStr,
+    str::FromStr, path::Path,
 };
 
 #[cfg(target_family = "unix")]
@@ -202,7 +202,7 @@ impl ResolverList {
     }
 }
 
-#[cfg(target_family = "unix")]
+//#[cfg(target_family = "unix")]
 impl TryFrom<&Path> for ResolverList {
     type Error = Error;
 
@@ -389,6 +389,8 @@ impl TryFrom<u32> for Resolver {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]
@@ -456,9 +458,9 @@ mod tests {
     //     assert!(iter.next().is_none());
     // }
 
-    #[cfg(target_family = "unix")]
+    //#[cfg(target_family = "unix")]
     #[test]
-    fn unix() {
+    fn from_file() {
         let list = ResolverList::try_from(Path::new("./tests/resolv.conf"));
         assert!(list.is_ok());
 
