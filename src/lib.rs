@@ -13,15 +13,55 @@
 //! let addresses = ResolverList::new().expect("failed to load DNS addresses");
 //! println!("{} addresses found", addresses.len());
 //! ```
-pub mod error;
-
+//! The error module.
+use std::path::PathBuf;
+use std::{io, net::AddrParseError};
 use std::{
     net::{IpAddr, SocketAddr},
     ops::{Deref, DerefMut},
-    str::FromStr, path::Path,
+    path::Path,
+    str::FromStr,
 };
 
-use crate::error::Error;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    // I/O errors
+    #[error("cannot open resolver file '{1}' ({0})")]
+    OpenFile(#[source] io::Error, PathBuf),
+
+    // IP address parsing errors
+    #[error("unable to parse IP '{0}'")]
+    IPParse(#[source] AddrParseError, String),
+
+    // When no resolver is found (shouldn't occur but left when using a dedicated resolver file on UNIX).
+    #[error("no configured resolver")]
+    NoConfiguredResolver,
+
+    /// Windows API return code from `GetAdaptersAddresses`.
+    #[cfg(any(windows, doc))]
+    #[error("Windows error {0}")]
+    Windows(u32),
+
+    /// Returned on Windows when the provided interface (either by index or by name) is not found.
+    #[cfg(any(windows, doc))]
+    #[error("no network interface found")]
+    NoNetworkInterface,
+}
+
+// // All convertion for internal errors for DNSError
+// impl From<io::Error> for Error {
+//     fn from(err: io::Error) -> Self {
+//         Error::Io(err)
+//     }
+// }
+
+// impl From<AddrParseError> for Error {
+//     fn from(err: AddrParseError) -> Self {
+//         Error::AddrParseError(err)
+//     }
+// }
 
 //----------------------------------------------------------------------------------
 // Cross-platfrom definitions
@@ -69,7 +109,7 @@ impl Resolver {
 impl Resolver {
     /// Return true if the ip address is found in the list.
     pub fn contains(&self, ip: &str) -> Result<bool, Error> {
-        let ip = IpAddr::from_str(ip)?;
+        let ip = IpAddr::from_str(ip).map_err(|e| Error::IPParse(e, ip.to_string()))?;
 
         Ok(self.ip_list.contains(&ip))
     }
@@ -109,11 +149,10 @@ impl ResolverList {
 
     /// Convert to a vector of IpAddr
     pub fn to_ip_list(&self) -> Vec<IpAddr> {
-        self.iter()
-            .fold(Vec::new(), |mut acc, x| {
-                acc.extend(&x.ip_list);
-                acc
-            })
+        self.iter().fold(Vec::new(), |mut acc, x| {
+            acc.extend(&x.ip_list);
+            acc
+        })
     }
 }
 
@@ -206,7 +245,8 @@ impl TryFrom<&Path> for ResolverList {
     /// TryFrom will be used to build the DNS servers' list from a resolve.conf-like file.
     fn try_from(resolv_file: &Path) -> Result<Self, Self::Error> {
         // read whole file, get rid of comments and extract DNS stubs
-        let resolv_conf = std::fs::read_to_string(resolv_file)?;
+        let resolv_conf = std::fs::read_to_string(resolv_file)
+            .map_err(|e| Error::OpenFile(e, resolv_file.to_path_buf()))?;
 
         let resolvers: Vec<Resolver> = resolv_conf
             .lines()
@@ -225,7 +265,7 @@ impl TryFrom<&Path> for ResolverList {
             .collect();
 
         if resolvers.is_empty() {
-            return Err(Error::NoResolverConfigured);
+            return Err(Error::NoConfiguredResolver);
         }
 
         Ok(Self(resolvers))
@@ -358,7 +398,7 @@ impl TryFrom<&str> for Resolver {
         debug_assert!(list.len() <= 1);
 
         if list.is_empty() {
-            return Err(Error::InterfaceNotFound);
+            return Err(Error::NoNetworkInterface);
         }
 
         Ok(list[0].clone())
@@ -377,7 +417,7 @@ impl TryFrom<u32> for Resolver {
         debug_assert!(list.len() <= 1);
 
         if list.is_empty() {
-            return Err(Error::InterfaceNotFound);
+            return Err(Error::NoNetworkInterface);
         }
 
         Ok(list[0].clone())
@@ -503,9 +543,9 @@ mod tests {
         assert_eq!(res.len(), 2);
 
         let res = Resolver::try_from(u32::MAX).unwrap_err();
-        assert!(matches!(res, Error::InterfaceNotFound));
+        assert!(matches!(res, Error::NoNetworkInterface));
 
         let res = Resolver::try_from("XXXXXX").unwrap_err();
-        assert!(matches!(res, Error::InterfaceNotFound));
+        assert!(matches!(res, Error::NoNetworkInterface));
     }
 }
