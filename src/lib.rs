@@ -1,6 +1,6 @@
-//! A utility crate to retrieve the DNS resolvers of the underlying OS.
+//! A utility crate to retrieve the DNS resolvers of the underlying hot OS.
 //!
-//! On UNIX-like platforms, it merely read the `/etc/resonlv.conf` file.
+//! On UNIX-like platforms, it merely read the `/etc/resolv.conf` file.
 //!
 //! On Windows, it uses the [windows](https://crates.io/crates/windows) crate and calls the dedicated APIs to get the list of DNS resolvers for all interfaces (`GetAdaptersAddresses`).
 //! In addition on this platform, the ability to provide a interface index or interface name to all get the resolvers on those.
@@ -27,49 +27,42 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    // I/O errors
+    /// I/O error when reading DNS configuration files like `/etc/resolv.conf`.
     #[error("cannot open resolver file '{1}' ({0})")]
     OpenFile(#[source] io::Error, PathBuf),
 
-    // IP address parsing errors
+    /// IP address parsing error when converting a string to an IP address.
     #[error("unable to parse IP '{0}'")]
     IPParse(#[source] AddrParseError, String),
 
-    // When no resolver is found (shouldn't occur but left when using a dedicated resolver file on UNIX).
+    /// When no resolver is found (shouldn't occur but left when using a dedicated resolver file on UNIX).
     #[error("no configured resolver")]
     NoConfiguredResolver,
 
-    /// Windows API return code from `GetAdaptersAddresses`.
+    /// Windows API return code from [GetAdaptersAddresses()](https://learn.microsoft.com/en-us/windows/win32/api/iphlpapi/nf-iphlpapi-getadaptersaddresses).
     #[cfg(any(windows, doc))]
     #[error("Windows error {0}")]
     Windows(u32),
 
-    /// Returned on Windows when the provided interface (either by index or by name) is not found.
+    /// Returnsed on Windows when the provided interface (either by index or by name) is not found.
     #[cfg(any(windows, doc))]
     #[error("no network interface found")]
     NoNetworkInterface,
 }
 
-// // All convertion for internal errors for DNSError
-// impl From<io::Error> for Error {
-//     fn from(err: io::Error) -> Self {
-//         Error::Io(err)
-//     }
-// }
-
-// impl From<AddrParseError> for Error {
-//     fn from(err: AddrParseError) -> Self {
-//         Error::AddrParseError(err)
-//     }
-// }
-
 //----------------------------------------------------------------------------------
-// Cross-platfrom definitions
+// Cross-platform definitions
 //----------------------------------------------------------------------------------
-/// Identify a single resolver tied to a network interface optionnally identified by its name and index.
+/// Identify a single DNS stub resolver configured in the host OS.
+///
+/// On Windows platforms, it's associated to a network interface and identified by its name
+/// and its index.
+///
+/// On UNIX platforms, it's generally configured regardless of the network interfaces and the interface
+/// name and index are not available.
 #[derive(Debug, Default, Clone)]
 pub struct Resolver {
-    // interface name (like "Ethernet 2")
+    /// interface name (like "Ethernet 2" or "eth1")
     if_name: Option<String>,
 
     // interface index (like 12)
@@ -80,42 +73,44 @@ pub struct Resolver {
 }
 
 impl Resolver {
-    /// Return the network interface name.
+    /// Returns the network interface name associated to this resolver if any.
+    #[inline(always)]
     pub fn if_name(&self) -> Option<&str> {
         self.if_name.as_deref()
     }
 
-    /// Return the network interface index.
+    /// Returns the network interface index associated to this resolver if any.
+    #[inline(always)]
     pub fn if_index(&self) -> Option<u32> {
         self.if_index
     }
 
-    /// Return the list of resolvers' ip addresses for this interface.
+    /// Returns the list of resolvers' ip addresses for this interface.
+    /// On UNIX, the list returned only holds a single ip address. On Windows, it holds all DNS ip addresses
+    /// found for an interface.
+    #[inline(always)]
     pub fn ip_list(&self) -> &[IpAddr] {
         self.ip_list.as_slice()
     }
 
-    /// Return the number of ip addresses in the adapter.
+    /// Returns the number of DNS ip addresses in the adapter. On UNIX platforms, this is always 1.
     pub fn len(&self) -> usize {
         self.ip_list.len()
     }
 
-    /// True if empty.
+    /// Returns `true` if the list of ip addresses is empty.
     pub fn is_empty(&self) -> bool {
         self.ip_list.is_empty()
     }
-}
 
-impl Resolver {
-    /// Return true if the ip address is found in the list.
-    pub fn contains(&self, ip: &str) -> Result<bool, Error> {
-        let ip = IpAddr::from_str(ip).map_err(|e| Error::IPParse(e, ip.to_string()))?;
-
-        Ok(self.ip_list.contains(&ip))
+    /// Returns `true` if the ip address is found in the list.
+    pub fn contains<T: Into<IpAddr>>(&self, ip: T) -> bool {
+        let ip = ip.into();
+        self.ip_list.contains(&ip)
     }
 }
 
-/// IntoIterator implementation to benefit from already defined iterator on `ip_list`.
+/// Creates an iterator for the list of ip addresses held in `self`.
 impl<'a> IntoIterator for &'a Resolver {
     type Item = &'a IpAddr;
     type IntoIter = std::slice::Iter<'a, IpAddr>;
@@ -125,17 +120,18 @@ impl<'a> IntoIterator for &'a Resolver {
     }
 }
 
-/// Hold the list of DNS resolvers IP addresses (IPV4 and IPV6), with the associated network interface name and index.
+/// Hold the list of system-wide DNS resolvers' IP addresses (IPV4 and/or IPV6), with the associated network interface name and index if
+/// available.
 #[derive(Debug, Clone)]
 pub struct ResolverList(Vec<Resolver>);
 
 impl ResolverList {
-    /// Return true if the ip address is found in the list.
-    pub fn contains(&self, ip: &str) -> Result<bool, Error> {
-        Ok(self.0.iter().filter_map(|x| x.contains(ip).ok()).any(|x| x))
+    /// Returns `true` if the ip address is found in `self`.
+    pub fn contains<T: Into<IpAddr> + Copy>(&self, ip: T) -> bool {
+        self.0.iter().map(|x| x.contains(ip)).any(|x| x)
     }
 
-    /// Convert the list of resolvers to a list of socket addresses.
+    /// Convert `self` to a vector of `SocketAddr`.
     pub fn to_socketaddresses(&self, port: u16) -> Vec<SocketAddr> {
         self.iter()
             .fold(Vec::new(), |mut acc, x| {
@@ -147,94 +143,12 @@ impl ResolverList {
             .collect()
     }
 
-    /// Convert to a vector of IpAddr
+    /// Convert `self` to a vector of `IpAddr`.
     pub fn to_ip_list(&self) -> Vec<IpAddr> {
         self.iter().fold(Vec::new(), |mut acc, x| {
             acc.extend(&x.ip_list);
             acc
         })
-    }
-}
-
-impl Deref for ResolverList {
-    /// The resulting type after dereferencing.
-    type Target = Vec<Resolver>;
-
-    /// Dereferences the value, giving the vector of DNS ip addresses.
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for ResolverList {
-    /// Dereferences the value, giving the vector of DNS ip addresses.
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-/// IntoIterator implementation to benefit from already defined iterator on `ip_list`.
-// impl<'a> IntoIterator for &'a ResolverList {
-//     type Item = &'a IpAddr;
-//     type IntoIter = std::slice::Iter<'a, IpAddr>;
-
-//     fn into_iter(self) -> Self::IntoIter {
-//         let x = self.0.iter().map(|x| x.ip_list.iter());
-//         x.into_iter()
-
-//     }
-// }
-
-// #[derive(Debug)]
-// pub struct IterHelper<'a> {
-//     ip_index: usize,
-//     resolver_iter: Iter<'a, Resolver>,
-//     ipaddr_iter: Option<Iter<'a, IpAddr>>,
-// }
-
-// impl<'a> IntoIterator for &'a ResolverList {
-//     type Item = &'a IpAddr;
-//     type IntoIter = IterHelper<'a>;
-
-//     fn into_iter(self) -> Self::IntoIter {
-//         IterHelper {
-//             ip_index: 0,
-//             resolver_iter: self.0.iter(),
-//             ipaddr_iter: None,
-//         }
-//     }
-// }
-
-// impl<'a> Iterator for IterHelper<'a> {
-//     type Item = &'a IpAddr;
-
-//     // just return the str reference
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if let Some(resolver) = self.resolver_iter.next() {
-//             // we start the Resolver iteration for the first time
-//             if self.ip_index == 0 {
-//                 self.ip_index = resolver.len();
-//             }
-
-//             //
-
-//         } else {
-//             None
-//         }
-//     }
-// }
-
-//----------------------------------------------------------------------------------
-// Unix definitions
-//----------------------------------------------------------------------------------
-#[cfg(target_family = "unix")]
-impl ResolverList {
-    /// Return the list of IPV4 & IPV6 DNS resolvers by reading the `/etc/resolv.conf` file.
-    pub fn new() -> Result<Self, Error> {
-        const RESOLV_CONF_FILE: &str = "/etc/resolv.conf";
-
-        let path = Path::new(RESOLV_CONF_FILE);
-        ResolverList::try_from(path)
     }
 }
 
@@ -272,6 +186,37 @@ impl TryFrom<&Path> for ResolverList {
     }
 }
 
+impl Deref for ResolverList {
+    /// The resulting type after dereferencing.
+    type Target = Vec<Resolver>;
+
+    /// Dereferences the value, giving the vector of DNS ip addresses.
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ResolverList {
+    /// Dereferences the value, giving the mutable vector of DNS ip addresses.
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+//----------------------------------------------------------------------------------
+// Unix definitions
+//----------------------------------------------------------------------------------
+#[cfg(any(unix, doc))]
+impl ResolverList {
+    /// Returns the list of IPV4 & IPV6 DNS resolvers by reading the `/etc/resolv.conf` file.
+    pub fn new() -> Result<Self, Error> {
+        const RESOLV_CONF_FILE: &str = "/etc/resolv.conf";
+
+        let path = Path::new(RESOLV_CONF_FILE);
+        ResolverList::try_from(path)
+    }
+}
+
 //----------------------------------------------------------------------------------
 // Windows definitions
 //----------------------------------------------------------------------------------
@@ -286,7 +231,7 @@ use windows::Win32::{
 
 #[cfg(target_family = "windows")]
 impl ResolverList {
-    /// Return the list of IPV4 & IPV6 DNS resolvers for all the network interfaces.
+    /// Returns the list of IPV4 & IPV6 DNS resolvers for all the network interfaces.
     pub fn new() -> Result<Self, Error> {
         let mut list: Vec<Resolver> = Vec::new();
 
@@ -445,6 +390,9 @@ mod tests {
             ip_list: v,
         };
 
+        assert!(r.contains(IpAddr::from_str("45.90.28.55").unwrap()));
+        assert!(!r.contains(IpAddr::from_str("8.8.8.8").unwrap()));
+
         let mut iter = r.into_iter();
         assert_eq!(iter.next(), Some(&IpAddr::from_str("45.90.28.55").unwrap()));
         assert_eq!(iter.next(), Some(&IpAddr::from_str("2a07:a8c0::").unwrap()));
@@ -452,50 +400,6 @@ mod tests {
         assert_eq!(iter.next(), Some(&IpAddr::from_str("2a07:a8c1::").unwrap()));
     }
 
-    // #[test]
-    // fn iter() {
-    //     let v1 = vec![
-    //         IpAddr::from_str("45.90.28.55").unwrap(),
-    //         IpAddr::from_str("2a07:a8c0::").unwrap(),
-    //     ];
-
-    //     let v2 = vec![
-    //         IpAddr::from_str("8.8.8.8").unwrap(),
-    //         IpAddr::from_str("1.1.1.1").unwrap(),
-    //     ];
-
-    //     let v3 = vec![IpAddr::from_str("127.0.0.53").unwrap()];
-
-    //     let r1 = Resolver {
-    //         if_index: None,
-    //         if_name: None,
-    //         ip_list: v1,
-    //     };
-
-    //     let r2 = Resolver {
-    //         if_index: None,
-    //         if_name: None,
-    //         ip_list: v2,
-    //     };
-
-    //     let r3 = Resolver {
-    //         if_index: None,
-    //         if_name: None,
-    //         ip_list: v3,
-    //     };
-
-    //     let list = ResolverList(vec![r1, r2, r3]);
-
-    //     let mut iter = list.into_iter();
-    //     assert_eq!(iter.next(), Some(&IpAddr::from_str("45.90.28.55").unwrap()));
-    //     assert_eq!(iter.next(), Some(&IpAddr::from_str("2a07:a8c0::").unwrap()));
-    //     assert_eq!(iter.next(), Some(&IpAddr::from_str("8.8.8.8").unwrap()));
-    //     assert_eq!(iter.next(), Some(&IpAddr::from_str("1.1.1.1").unwrap()));
-    //     assert_eq!(iter.next(), Some(&IpAddr::from_str("127.0.0.53").unwrap()));
-    //     assert!(iter.next().is_none());
-    // }
-
-    //#[cfg(target_family = "unix")]
     #[test]
     fn from_file() {
         let list = ResolverList::try_from(Path::new("./tests/resolv.conf"));
@@ -504,19 +408,12 @@ mod tests {
         let list = list.unwrap();
         assert_eq!(list.len(), 4);
 
-        assert!(list.contains("45.90.28.55").unwrap());
-        assert!(list.contains("45.90.30.55").unwrap());
-        assert!(list.contains("2a07:a8c0::").unwrap());
-        assert!(list.contains("2a07:a8c1::").unwrap());
-        assert!(list.contains("2a07:a8c1::").unwrap());
-        assert!(!list.contains("1.1.1.1").unwrap());
-
-        // let mut iter = list.into_iter();
-        // assert_eq!(iter.next(), Some(&IpAddr::from_str("45.90.28.55").unwrap()));
-        // assert_eq!(iter.next(), Some(&IpAddr::from_str("2a07:a8c0::").unwrap()));
-        // assert_eq!(iter.next(), Some(&IpAddr::from_str("45.90.30.55").unwrap()));
-        // assert_eq!(iter.next(), Some(&IpAddr::from_str("2a07:a8c1::").unwrap()));
-        // assert!(iter.next().is_none());
+        assert!(list.contains(IpAddr::from_str("45.90.28.55").unwrap()));
+        assert!(list.contains(IpAddr::from_str("45.90.30.55").unwrap()));
+        assert!(list.contains(IpAddr::from_str("2a07:a8c0::").unwrap()));
+        assert!(list.contains(IpAddr::from_str("2a07:a8c1::").unwrap()));
+        assert!(list.contains(IpAddr::from_str("2a07:a8c1::").unwrap()));
+        assert!(!list.contains(IpAddr::from_str("1.1.1.1").unwrap()));
     }
 
     #[cfg(target_family = "windows")]

@@ -9,5 +9,5 @@ edition = "2021"
 thiserror = "1.0.65"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.52" , features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
+windows = { version = "0.58" , features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock"] }
 
