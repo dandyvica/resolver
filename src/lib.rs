@@ -2,7 +2,8 @@
 //!
 //! On UNIX-like platforms, it merely read the `/etc/resolv.conf` file.
 //!
-//! On Windows, it uses the [windows](https://crates.io/crates/windows) crate and calls the dedicated APIs to get the list of DNS resolvers for all interfaces (`GetAdaptersAddresses`).
+//! On Windows, it uses the [windows](https://crates.io/crates/windows) crate and calls the dedicated APIs to get the list of
+//! DNS resolvers for all interfaces (`GetAdaptersAddresses`).
 //! In addition on this platform, the ability to provide a interface index or interface name to all get the resolvers on those.
 //!
 //! Usage on Unix:
@@ -14,17 +15,29 @@
 //! println!("{} addresses found", addresses.len());
 //! ```
 //! The error module.
-use std::path::PathBuf;
-use std::{io, net::AddrParseError};
 use std::{
-    net::{IpAddr, SocketAddr},
+    io,
+    net::{AddrParseError, IpAddr, SocketAddr},
     ops::{Deref, DerefMut},
-    path::Path,
+    path::{Path, PathBuf},
     str::FromStr,
 };
 
 use thiserror::Error;
 
+//----------------------------------------------------------------------------------
+// Windows definitions
+//----------------------------------------------------------------------------------
+#[cfg(target_family = "windows")]
+use windows::Win32::{
+    Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_INVALID_PARAMETER, ERROR_SUCCESS},
+    NetworkManagement::IpHelper::{
+        GetAdaptersAddresses, GAA_FLAG_INCLUDE_PREFIX, IP_ADAPTER_ADDRESSES_LH,
+    },
+    Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6},
+};
+
+/// All possible errors when getting information on host resolvers.
 #[derive(Error, Debug)]
 pub enum Error {
     /// I/O error when reading DNS configuration files like `/etc/resolv.conf`.
@@ -44,15 +57,12 @@ pub enum Error {
     #[error("Windows error {0}")]
     Windows(u32),
 
-    /// Returnsed on Windows when the provided interface (either by index or by name) is not found.
+    /// Returned on Windows when the provided interface (either by index or by name) is not found.
     #[cfg(any(windows, doc))]
     #[error("no network interface found")]
     NoNetworkInterface,
 }
 
-//----------------------------------------------------------------------------------
-// Cross-platform definitions
-//----------------------------------------------------------------------------------
 /// Identify a single DNS stub resolver configured in the host OS.
 ///
 /// On Windows platforms, it's associated to a network interface and identified by its name
@@ -89,7 +99,7 @@ impl Resolver {
     /// On UNIX, the list returned only holds a single ip address. On Windows, it holds all DNS ip addresses
     /// found for an interface.
     #[inline(always)]
-    pub fn ip_list(&self) -> &[IpAddr] {
+    pub fn as_ip_vec(&self) -> &[IpAddr] {
         self.ip_list.as_slice()
     }
 
@@ -103,7 +113,7 @@ impl Resolver {
         self.ip_list.is_empty()
     }
 
-    /// Returns `true` if the ip address is found in the list.
+    /// Returns `true` if the ip address is found in the list of ip addresses associated with this resolver.
     pub fn contains<T: Into<IpAddr>>(&self, ip: T) -> bool {
         let ip = ip.into();
         self.ip_list.contains(&ip)
@@ -120,118 +130,24 @@ impl<'a> IntoIterator for &'a Resolver {
     }
 }
 
-/// Hold the list of system-wide DNS resolvers' IP addresses (IPV4 and/or IPV6), with the associated network interface name and index if
+/// Holds the list of system-wide DNS resolvers' IP addresses (IPV4 and/or IPV6), with the associated network interface name and index if
 /// available.
 #[derive(Debug, Clone)]
 pub struct ResolverList(Vec<Resolver>);
 
 impl ResolverList {
-    /// Returns `true` if the ip address is found in `self`.
-    pub fn contains<T: Into<IpAddr> + Copy>(&self, ip: T) -> bool {
-        self.0.iter().map(|x| x.contains(ip)).any(|x| x)
-    }
-
-    /// Convert `self` to a vector of `SocketAddr`.
-    pub fn to_socketaddresses(&self, port: u16) -> Vec<SocketAddr> {
-        self.iter()
-            .fold(Vec::new(), |mut acc, x| {
-                acc.extend(&x.ip_list);
-                acc
-            })
-            .iter()
-            .map(|x| SocketAddr::new(*x, port))
-            .collect()
-    }
-
-    /// Convert `self` to a vector of `IpAddr`.
-    pub fn to_ip_list(&self) -> Vec<IpAddr> {
-        self.iter().fold(Vec::new(), |mut acc, x| {
-            acc.extend(&x.ip_list);
-            acc
-        })
-    }
-}
-
-//#[cfg(target_family = "unix")]
-impl TryFrom<&Path> for ResolverList {
-    type Error = Error;
-
-    /// TryFrom will be used to build the DNS servers' list from a resolve.conf-like file.
-    fn try_from(resolv_file: &Path) -> Result<Self, Self::Error> {
-        // read whole file, get rid of comments and extract DNS stubs
-        let resolv_conf = std::fs::read_to_string(resolv_file)
-            .map_err(|e| Error::OpenFile(e, resolv_file.to_path_buf()))?;
-
-        let resolvers: Vec<Resolver> = resolv_conf
-            .lines()
-            // only get lines startgin with "nameserver"
-            .filter(|line| line.trim().starts_with("nameserver"))
-            // get rid of whitespaces
-            .filter_map(|addr| addr.split_ascii_whitespace().nth(1))
-            // build a Resolver struct from string matching an ip address
-            .map(|s| {
-                let mut res = Resolver::default();
-                let ip = IpAddr::from_str(s);
-                res.ip_list.push(ip.unwrap());
-
-                res
-            })
-            .collect();
-
-        if resolvers.is_empty() {
-            return Err(Error::NoConfiguredResolver);
-        }
-
-        Ok(Self(resolvers))
-    }
-}
-
-impl Deref for ResolverList {
-    /// The resulting type after dereferencing.
-    type Target = Vec<Resolver>;
-
-    /// Dereferences the value, giving the vector of DNS ip addresses.
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for ResolverList {
-    /// Dereferences the value, giving the mutable vector of DNS ip addresses.
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-//----------------------------------------------------------------------------------
-// Unix definitions
-//----------------------------------------------------------------------------------
-#[cfg(any(unix, doc))]
-impl ResolverList {
-    /// Returns the list of IPV4 & IPV6 DNS resolvers by reading the `/etc/resolv.conf` file.
+    /// `UNIX only`: returns the list of IPV4 & IPV6 DNS resolvers by reading the `/etc/resolv.conf` file.
+    #[cfg(any(unix, doc))]
     pub fn new() -> Result<Self, Error> {
         const RESOLV_CONF_FILE: &str = "/etc/resolv.conf";
 
         let path = Path::new(RESOLV_CONF_FILE);
         ResolverList::try_from(path)
     }
-}
 
-//----------------------------------------------------------------------------------
-// Windows definitions
-//----------------------------------------------------------------------------------
-#[cfg(target_family = "windows")]
-use windows::Win32::{
-    Foundation::{ERROR_BUFFER_OVERFLOW, ERROR_INVALID_PARAMETER, ERROR_SUCCESS},
-    NetworkManagement::IpHelper::{
-        GetAdaptersAddresses, GAA_FLAG_INCLUDE_PREFIX, IP_ADAPTER_ADDRESSES_LH,
-    },
-    Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR, SOCKADDR_IN, SOCKADDR_IN6},
-};
-
-#[cfg(target_family = "windows")]
-impl ResolverList {
-    /// Returns the list of IPV4 & IPV6 DNS resolvers for all the network interfaces.
+    #[cfg(any(windows, doc))]
+    /// `Windows only`: returns the list of IPV4 & IPV6 DNS resolvers for all the network interfaces by querying
+    /// the `GetAdaptersAddresses()` API.
     pub fn new() -> Result<Self, Error> {
         let mut list: Vec<Resolver> = Vec::new();
 
@@ -304,6 +220,7 @@ impl ResolverList {
     }
 
     // utility function which is used to build an IpAddr from an array used in Windows OS
+    #[cfg(target_family = "windows")]
     fn from_sockaddr(sockaddr: *const SOCKADDR) -> Result<IpAddr, Error> {
         use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -329,6 +246,81 @@ impl ResolverList {
                 _ => Err(Error::Windows(ERROR_INVALID_PARAMETER.0)),
             }
         }
+    }
+
+    /// Returns `true` if the ip address is found in `self`.
+    pub fn contains<T: Into<IpAddr> + Copy>(&self, ip: T) -> bool {
+        self.0.iter().map(|x| x.contains(ip)).any(|x| x)
+    }
+
+    /// Convert `self` to a vector of `SocketAddr`.
+    pub fn to_socketaddr(&self, port: u16) -> Vec<SocketAddr> {
+        self.iter()
+            .fold(Vec::new(), |mut acc, x| {
+                acc.extend(&x.ip_list);
+                acc
+            })
+            .iter()
+            .map(|x| SocketAddr::new(*x, port))
+            .collect()
+    }
+
+    /// Convert `self` to a vector of `IpAddr`.
+    pub fn to_ip_vec(&self) -> Vec<IpAddr> {
+        self.iter().fold(Vec::new(), |mut acc, x| {
+            acc.extend(&x.ip_list);
+            acc
+        })
+    }
+}
+
+impl TryFrom<&Path> for ResolverList {
+    type Error = Error;
+
+    /// TryFrom will be used to build the DNS servers' list from a resolve.conf-like file.
+    fn try_from(resolv_file: &Path) -> Result<Self, Self::Error> {
+        // read whole file, get rid of comments and extract DNS stubs
+        let resolv_conf = std::fs::read_to_string(resolv_file)
+            .map_err(|e| Error::OpenFile(e, resolv_file.to_path_buf()))?;
+
+        let resolvers: Vec<Resolver> = resolv_conf
+            .lines()
+            // only get lines startgin with "nameserver"
+            .filter(|line| line.trim().starts_with("nameserver"))
+            // get rid of whitespaces
+            .filter_map(|addr| addr.split_ascii_whitespace().nth(1))
+            // build a Resolver struct from string matching an ip address
+            .map(|s| {
+                let mut res = Resolver::default();
+                let ip = IpAddr::from_str(s);
+                res.ip_list.push(ip.unwrap());
+
+                res
+            })
+            .collect();
+
+        if resolvers.is_empty() {
+            return Err(Error::NoConfiguredResolver);
+        }
+
+        Ok(Self(resolvers))
+    }
+}
+
+impl Deref for ResolverList {
+    /// The resulting type after dereferencing.
+    type Target = Vec<Resolver>;
+
+    /// Dereferences the value, giving the vector of DNS ip addresses.
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for ResolverList {
+    /// Dereferences the value, giving the mutable vector of DNS ip addresses.
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
     }
 }
 
