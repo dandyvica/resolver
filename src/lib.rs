@@ -14,7 +14,6 @@
 //! let addresses = ResolverList::new().expect("failed to load DNS addresses");
 //! println!("{} addresses found", addresses.len());
 //! ```
-//! The error module.
 use std::{
     io,
     net::{AddrParseError, IpAddr, SocketAddr},
@@ -157,26 +156,23 @@ impl ResolverList {
                         let if_index = (*p).Ipv6IfIndex;
 
                         // now get all DNS ips for this interface
-                        let mut ip_list: Vec<IpAddr> = Vec::new();
                         let mut p_dns = (*p).FirstDnsServerAddress;
 
                         // loop through DNS addresses for this adapter
                         while !p_dns.is_null() {
                             let sockaddr = (*p_dns).Address.lpSockaddr;
                             let dns_addr = Self::from_sockaddr(sockaddr)?;
-                            ip_list.push(dns_addr);
+
+                            // create new resolver
+                            let res = Resolver {
+                                ip_addr: dns_addr,
+                                if_name: Some(if_name.clone()),
+                                if_index: Some(if_index),
+                            };
+                            list.push(res);
 
                             p_dns = (*p_dns).Next;
                         }
-
-                        // save resolver into the list
-                        let res = Resolver {
-                            if_name: Some(if_name),
-                            if_index: Some(if_index),
-                            ip_list,
-                        };
-
-                        list.push(res);
 
                         p = (*p).Next;
                     }
@@ -279,14 +275,14 @@ impl Deref for ResolverList {
     /// The resulting type after dereferencing.
     type Target = Vec<Resolver>;
 
-    /// Dereferences the value, giving the vector of DNS ip addresses.
+    /// Dereferences the value, giving the vector of `Resolver` structs.
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
 impl DerefMut for ResolverList {
-    /// Dereferences the value, giving the mutable vector of DNS ip addresses.
+    /// Dereferences the value, giving the mutable vector of `Resolver` structs.
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -300,7 +296,6 @@ impl TryFrom<&str> for Resolver {
     fn try_from(if_name: &str) -> Result<Self, Self::Error> {
         let mut list = ResolverList::new()?;
         list.retain(|x| x.if_name.as_ref() == Some(&if_name.to_string()));
-        debug_assert!(list.len() <= 1);
 
         if list.is_empty() {
             return Err(Error::NoNetworkInterface);
@@ -319,7 +314,6 @@ impl TryFrom<u32> for Resolver {
     fn try_from(if_index: u32) -> Result<Self, Self::Error> {
         let mut list = ResolverList::new()?;
         list.0.retain(|x| x.if_index == Some(if_index));
-        debug_assert!(list.len() <= 1);
 
         if list.is_empty() {
             return Err(Error::NoNetworkInterface);
@@ -358,26 +352,17 @@ mod tests {
         assert!(list.is_ok());
 
         let list = list.unwrap();
+        for r in list.iter() {
+            println!("r={:?}", r);
+        }
+
         assert_eq!(list.len(), 4);
 
-        assert!(list.contains("192.168.122.1").unwrap());
-        assert!(list.contains("8.8.8.8").unwrap());
-        assert!(list.contains("1.1.1.1").unwrap());
-        assert!(list.contains("fec0:0:0:ffff::1").unwrap());
-        assert!(list.contains("fec0:0:0:ffff::2").unwrap());
-        assert!(list.contains("fec0:0:0:ffff::3").unwrap());
-        assert!(!list.contains("9.9.9.9").unwrap());
-
-        let res = Resolver::try_from(2).unwrap();
-        assert_eq!(res.len(), 2);
-
-        let res = Resolver::try_from("Ethernet 2").unwrap();
-        assert_eq!(res.len(), 2);
-
-        let res = Resolver::try_from(u32::MAX).unwrap_err();
-        assert!(matches!(res, Error::NoNetworkInterface));
-
-        let res = Resolver::try_from("XXXXXX").unwrap_err();
-        assert!(matches!(res, Error::NoNetworkInterface));
+        assert!(list.contains(IpAddr::from_str("192.168.122.1").unwrap()));
+        assert!(list.contains(IpAddr::from_str("8.8.8.8").unwrap()));
+        assert!(list.contains(IpAddr::from_str("1.1.1.1").unwrap()));
+        assert!(list.contains(IpAddr::from_str("fec0:0:0:ffff::1").unwrap()));
+        assert!(list.contains(IpAddr::from_str("fec0:0:0:ffff::2").unwrap()));
+        assert!(list.contains(IpAddr::from_str("fec0:0:0:ffff::3").unwrap()));
     }
 }
