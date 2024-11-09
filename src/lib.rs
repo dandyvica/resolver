@@ -70,19 +70,25 @@ pub enum Error {
 ///
 /// On UNIX platforms, it's generally configured regardless of the network interfaces and the interface
 /// name and index are not available.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Resolver {
-    /// interface name (like "Ethernet 2" or "eth1")
+    // resolver ip address
+    ip_addr: IpAddr,
+
+    // interface name (like "Ethernet 2" or "eth1")
     if_name: Option<String>,
 
     // interface index (like 12)
     if_index: Option<u32>,
-
-    // list of DNS resolvers for this interface
-    ip_list: Vec<IpAddr>,
 }
 
 impl Resolver {
+    /// Returns a reference on the resolver's ip address
+    #[inline(always)]
+    pub fn ip_addr(&self) -> &IpAddr {
+        &self.ip_addr
+    }
+
     /// Returns the network interface name associated to this resolver if any.
     #[inline(always)]
     pub fn if_name(&self) -> Option<&str> {
@@ -93,40 +99,6 @@ impl Resolver {
     #[inline(always)]
     pub fn if_index(&self) -> Option<u32> {
         self.if_index
-    }
-
-    /// Returns the list of resolvers' ip addresses for this interface.
-    /// On UNIX, the list returned only holds a single ip address. On Windows, it holds all DNS ip addresses
-    /// found for an interface.
-    #[inline(always)]
-    pub fn as_ip_vec(&self) -> &[IpAddr] {
-        self.ip_list.as_slice()
-    }
-
-    /// Returns the number of DNS ip addresses in the adapter. On UNIX platforms, this is always 1.
-    pub fn len(&self) -> usize {
-        self.ip_list.len()
-    }
-
-    /// Returns `true` if the list of ip addresses is empty.
-    pub fn is_empty(&self) -> bool {
-        self.ip_list.is_empty()
-    }
-
-    /// Returns `true` if the ip address is found in the list of ip addresses associated with this resolver.
-    pub fn contains<T: Into<IpAddr>>(&self, ip: T) -> bool {
-        let ip = ip.into();
-        self.ip_list.contains(&ip)
-    }
-}
-
-/// Creates an iterator for the list of ip addresses held in `self`.
-impl<'a> IntoIterator for &'a Resolver {
-    type Item = &'a IpAddr;
-    type IntoIter = std::slice::Iter<'a, IpAddr>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.ip_list.iter()
     }
 }
 
@@ -249,28 +221,24 @@ impl ResolverList {
     }
 
     /// Returns `true` if the ip address is found in `self`.
-    pub fn contains<T: Into<IpAddr> + Copy>(&self, ip: T) -> bool {
-        self.0.iter().map(|x| x.contains(ip)).any(|x| x)
+    pub fn contains<T>(&self, ip: T) -> bool
+    where
+        T: Into<IpAddr>,
+        IpAddr: PartialEq<T>,
+    {
+        self.0.iter().map(|x| x.ip_addr == ip).any(|x| x)
     }
 
     /// Convert `self` to a vector of `SocketAddr`.
     pub fn to_socketaddr(&self, port: u16) -> Vec<SocketAddr> {
         self.iter()
-            .fold(Vec::new(), |mut acc, x| {
-                acc.extend(&x.ip_list);
-                acc
-            })
-            .iter()
-            .map(|x| SocketAddr::new(*x, port))
+            .map(|x| SocketAddr::new(x.ip_addr, port))
             .collect()
     }
 
     /// Convert `self` to a vector of `IpAddr`.
     pub fn to_ip_vec(&self) -> Vec<IpAddr> {
-        self.iter().fold(Vec::new(), |mut acc, x| {
-            acc.extend(&x.ip_list);
-            acc
-        })
+        self.iter().map(|x| x.ip_addr).collect()
     }
 }
 
@@ -285,17 +253,17 @@ impl TryFrom<&Path> for ResolverList {
 
         let resolvers: Vec<Resolver> = resolv_conf
             .lines()
-            // only get lines startgin with "nameserver"
+            // only get lines starting with "nameserver"
             .filter(|line| line.trim().starts_with("nameserver"))
             // get rid of whitespaces
             .filter_map(|addr| addr.split_ascii_whitespace().nth(1))
-            // build a Resolver struct from string matching an ip address
-            .map(|s| {
-                let mut res = Resolver::default();
-                let ip = IpAddr::from_str(s);
-                res.ip_list.push(ip.unwrap());
-
-                res
+            // convert to IpAddr
+            .filter_map(|s| IpAddr::from_str(s).ok())
+            // collect Resolv structs
+            .map(|ip| Resolver {
+                ip_addr: ip,
+                if_name: None,
+                if_index: None,
             })
             .collect();
 
@@ -366,31 +334,6 @@ mod tests {
     use std::path::Path;
 
     use super::*;
-
-    #[test]
-    fn resolver() {
-        let v = vec![
-            IpAddr::from_str("45.90.28.55").unwrap(),
-            IpAddr::from_str("2a07:a8c0::").unwrap(),
-            IpAddr::from_str("45.90.30.55").unwrap(),
-            IpAddr::from_str("2a07:a8c1::").unwrap(),
-        ];
-
-        let r = Resolver {
-            if_index: None,
-            if_name: None,
-            ip_list: v,
-        };
-
-        assert!(r.contains(IpAddr::from_str("45.90.28.55").unwrap()));
-        assert!(!r.contains(IpAddr::from_str("8.8.8.8").unwrap()));
-
-        let mut iter = r.into_iter();
-        assert_eq!(iter.next(), Some(&IpAddr::from_str("45.90.28.55").unwrap()));
-        assert_eq!(iter.next(), Some(&IpAddr::from_str("2a07:a8c0::").unwrap()));
-        assert_eq!(iter.next(), Some(&IpAddr::from_str("45.90.30.55").unwrap()));
-        assert_eq!(iter.next(), Some(&IpAddr::from_str("2a07:a8c1::").unwrap()));
-    }
 
     #[test]
     fn from_file() {
