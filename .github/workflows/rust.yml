@@ -10,8 +10,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-ubuntu:
-    runs-on: ubuntu-latest
+  build-unix:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        toolchain:
+          - stable  
+
     steps:
 
     - name: Checkout repo
@@ -22,7 +28,7 @@ jobs:
       with:
         toolchain: stable
 
-    - name: Compile
+    - name: Compile and test on ${{ runner.os }}-${{ runner.arch }}
       run: |
         cargo b
         cargo t
