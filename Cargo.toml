@@ -1,5 +1,5 @@
 [package]
-name = "resolver"
+name = "resolving"
 version = "0.1.0"
 edition = "2021"
 authors = ["Alain Viguier <dandyvica@gmail.com>"]
